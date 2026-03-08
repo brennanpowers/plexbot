@@ -32,7 +32,4 @@ Everything lives in `plexbot.py`. No tests, no modules.
 
 ## Key Design Decisions
 
-- Quiet hours and timezone are hardcoded to America/Chicago — not configurable via env vars.
-- `docker-compose` plugin is not available on the target Unraid server — use `docker build` + `docker run` instead.
-- The `docker-compose.yml` exists but docker compose plugin is not installed on the Unraid server, so it's not used in production.
-- Startup delay (default 180s) exists because Plex container may not be ready when plexbot starts on Unraid boot.
+- Quiet hours and timezone are hardcoded to America/Chicago — not configurable via env vars
