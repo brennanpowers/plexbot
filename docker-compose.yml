@@ -1,0 +1,13 @@
+services:
+  plexbot:
+    build: .
+    container_name: plexbot
+    restart: unless-stopped
+    environment:
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - PLEX_URL=${PLEX_URL:-http://10.0.0.16:32400}
+      - CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-300}
+      - ALERT_COOLDOWN_SECONDS=${ALERT_COOLDOWN_SECONDS:-3600}
+      - STARTUP_DELAY_SECONDS=${STARTUP_DELAY_SECONDS:-180}
+    env_file:
+      - .env
