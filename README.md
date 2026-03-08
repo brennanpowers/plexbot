@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/plexbot-logo.png" alt="Plexbot" width="200">
+</p>
+
 # Plexbot
 
 A Discord bot that monitors your Plex Media Server and alerts you when it goes down. Alerts come with random movie and TV quotes for fun.
