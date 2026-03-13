@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import os
 import random
 import subprocess
@@ -10,6 +11,7 @@ from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import discord
+from croniter import croniter
 from dotenv import load_dotenv
 import requests
 
@@ -28,7 +30,12 @@ CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL_SECONDS", "300"))
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "3600"))
 SNOOZE_SECONDS = int(os.environ.get("SNOOZE_HOURS", "4")) * 3600
 STARTUP_DELAY = int(os.environ.get("STARTUP_DELAY_SECONDS", "180"))
-QUIET_TZ = ZoneInfo("America/Chicago")
+_quiet_tz_name = os.environ.get("QUIET_HOURS_TIMEZONE", "UTC").strip()
+try:
+    QUIET_TZ = ZoneInfo(_quiet_tz_name)
+except KeyError:
+    log.warning("Quiet hours: invalid timezone '%s', falling back to UTC", _quiet_tz_name)
+    QUIET_TZ = ZoneInfo("UTC")
 QUIET_START = 23
 QUIET_END = 7
 MENTION_USER_ID = os.environ.get("DISCORD_MENTION_USER_ID")
@@ -40,6 +47,20 @@ PLEX_SSH_USER = os.environ.get("PLEX_SSH_USER", "root")
 RESTART_AFTER_ALERTS = int(os.environ.get("RESTART_AFTER_ALERTS", "2"))
 RESTART_CHECK_DELAY = int(os.environ.get("RESTART_CHECK_DELAY_SECONDS", "60"))
 RESTART_TIMEOUT = int(os.environ.get("RESTART_TIMEOUT_SECONDS", "120"))
+PLEX_SCHEDULED_RESTART_ENABLED = os.environ.get("PLEX_SCHEDULED_RESTART_ENABLED", "false").lower() in ("true", "1", "yes")
+PLEX_SCHEDULED_RESTART_CRON = os.environ.get("PLEX_SCHEDULED_RESTART_CRON", "").strip()
+PLEX_SCHEDULED_RESTART_FREQUENCY = os.environ.get("PLEX_SCHEDULED_RESTART_FREQUENCY", "").strip().lower()
+PLEX_SCHEDULED_RESTART_TIME = os.environ.get("PLEX_SCHEDULED_RESTART_TIME", "04:00").strip()
+PLEX_SCHEDULED_RESTART_DAY_OF_WEEK = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_WEEK", "").strip().lower()
+PLEX_SCHEDULED_RESTART_DAY_OF_MONTH = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_MONTH", "").strip()
+PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS = os.environ.get(
+    "PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS", "true").lower() in ("true", "1", "yes")
+_restart_tz_name = os.environ.get("PLEX_SCHEDULED_RESTART_TIMEZONE", "UTC").strip()
+try:
+    PLEX_SCHEDULED_RESTART_TZ = ZoneInfo(_restart_tz_name)
+except KeyError:
+    log.warning("Scheduled restart: invalid timezone '%s', falling back to UTC", _restart_tz_name)
+    PLEX_SCHEDULED_RESTART_TZ = ZoneInfo("UTC")
 REQUIRED_LIBRARIES = [
     name.strip()
     for name in os.environ.get("PLEX_REQUIRED_LIBRARIES", "").split(",")
@@ -201,6 +222,17 @@ def get_library_count(key):
         return None
 
 
+def get_active_streams():
+    """Return the number of active Plex streams, or None if unable to check."""
+    root = _plex_get("/status/sessions", use_token=True)
+    if root is None:
+        return None
+    try:
+        return int(root.get("size", 0))
+    except (ValueError, TypeError):
+        return None
+
+
 def format_duration(seconds):
     seconds = int(seconds)
     if seconds < 60:
@@ -224,6 +256,149 @@ def build_message(text):
     if MENTION_USER_ID:
         return f"<@{MENTION_USER_ID}> {text}"
     return text
+
+
+DAY_OF_WEEK_MAP = {
+    "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+    "thursday": 4, "friday": 5, "saturday": 6,
+    "sun": 0, "mon": 1, "tue": 2, "wed": 3,
+    "thu": 4, "fri": 5, "sat": 6,
+}
+
+
+def parse_restart_time(time_str):
+    """Parse a time string like '23:00' or '11:00 PM'. Returns (hour, minute)."""
+    for fmt in ("%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%I%p"):
+        try:
+            t = datetime.strptime(time_str.strip(), fmt)
+            return t.hour, t.minute
+        except ValueError:
+            continue
+    log.warning("Scheduled restart: could not parse time '%s', defaulting to 04:00", time_str)
+    return 4, 0
+
+
+def build_restart_cron_expression():
+    """Build a cron expression from config. Returns (cron_expr, day_of_month_raw) or (None, None)."""
+    if PLEX_SCHEDULED_RESTART_CRON:
+        if croniter.is_valid(PLEX_SCHEDULED_RESTART_CRON):
+            if PLEX_SCHEDULED_RESTART_FREQUENCY:
+                log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_CRON is set, ignoring PLEX_SCHEDULED_RESTART_FREQUENCY")
+            if PLEX_SCHEDULED_RESTART_DAY_OF_WEEK:
+                log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_CRON is set, ignoring PLEX_SCHEDULED_RESTART_DAY_OF_WEEK")
+            if PLEX_SCHEDULED_RESTART_DAY_OF_MONTH:
+                log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_CRON is set, ignoring PLEX_SCHEDULED_RESTART_DAY_OF_MONTH")
+            if PLEX_SCHEDULED_RESTART_TIME != "04:00":
+                log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_CRON is set, ignoring PLEX_SCHEDULED_RESTART_TIME")
+            return PLEX_SCHEDULED_RESTART_CRON, None
+        log.warning("Scheduled restart: invalid cron expression '%s'", PLEX_SCHEDULED_RESTART_CRON)
+        return None, None
+
+    if not PLEX_SCHEDULED_RESTART_FREQUENCY:
+        log.warning("Scheduled restart: enabled but no PLEX_SCHEDULED_RESTART_CRON or PLEX_SCHEDULED_RESTART_FREQUENCY set")
+        return None, None
+
+    hour, minute = parse_restart_time(PLEX_SCHEDULED_RESTART_TIME)
+
+    if PLEX_SCHEDULED_RESTART_FREQUENCY == "daily":
+        if PLEX_SCHEDULED_RESTART_DAY_OF_WEEK:
+            log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_WEEK ignored for daily frequency")
+        if PLEX_SCHEDULED_RESTART_DAY_OF_MONTH:
+            log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_MONTH ignored for daily frequency")
+        return f"{minute} {hour} * * *", None
+
+    if PLEX_SCHEDULED_RESTART_FREQUENCY == "weekly":
+        if PLEX_SCHEDULED_RESTART_DAY_OF_MONTH:
+            log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_MONTH ignored for weekly frequency")
+        dow = DAY_OF_WEEK_MAP.get(PLEX_SCHEDULED_RESTART_DAY_OF_WEEK)
+        if dow is None:
+            if PLEX_SCHEDULED_RESTART_DAY_OF_WEEK:
+                log.warning("Scheduled restart: unrecognized day '%s', defaulting to sunday",
+                            PLEX_SCHEDULED_RESTART_DAY_OF_WEEK)
+            else:
+                log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_WEEK not set, defaulting to sunday")
+            dow = 0
+        return f"{minute} {hour} * * {dow}", None
+
+    if PLEX_SCHEDULED_RESTART_FREQUENCY == "monthly":
+        if PLEX_SCHEDULED_RESTART_DAY_OF_WEEK:
+            log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_WEEK ignored for monthly frequency")
+        dom = 1
+        if PLEX_SCHEDULED_RESTART_DAY_OF_MONTH:
+            try:
+                dom = int(PLEX_SCHEDULED_RESTART_DAY_OF_MONTH)
+            except ValueError:
+                log.warning("Scheduled restart: invalid day of month '%s', defaulting to 1",
+                            PLEX_SCHEDULED_RESTART_DAY_OF_MONTH)
+                dom = 1
+            if dom < 1:
+                log.warning("Scheduled restart: day of month %d < 1, defaulting to 1", dom)
+                dom = 1
+            elif dom > 31:
+                log.warning("Scheduled restart: day of month %d > 31, clamping to 31", dom)
+                dom = 31
+        else:
+            log.warning("Scheduled restart: PLEX_SCHEDULED_RESTART_DAY_OF_MONTH not set, defaulting to 1st")
+        return f"{minute} {hour} {dom} * *", dom
+
+    log.warning("Scheduled restart: unrecognized frequency '%s' (use daily/weekly/monthly)",
+                PLEX_SCHEDULED_RESTART_FREQUENCY)
+    return None, None
+
+
+def next_scheduled_restart(cron_expr, day_of_month_raw):
+    """Get the next scheduled restart time, handling monthly day clamping."""
+    now = datetime.now(PLEX_SCHEDULED_RESTART_TZ)
+    cron = croniter(cron_expr, now.replace(tzinfo=None))
+    next_naive = cron.get_next(datetime)
+    next_time = next_naive.replace(tzinfo=PLEX_SCHEDULED_RESTART_TZ)
+
+    if day_of_month_raw and day_of_month_raw > 28:
+        max_day = calendar.monthrange(next_time.year, next_time.month)[1]
+        if day_of_month_raw > max_day:
+            next_time = next_time.replace(day=max_day)
+
+    return next_time
+
+
+async def scheduled_restart_loop(channel):
+    """Run scheduled restarts on a cron-like schedule."""
+    cron_expr, day_of_month_raw = build_restart_cron_expression()
+    if cron_expr is None:
+        return
+
+    log.info("Scheduled restart: cron expression '%s' (%s)", cron_expr, PLEX_SCHEDULED_RESTART_TZ)
+
+    while True:
+        next_time = next_scheduled_restart(cron_expr, day_of_month_raw)
+        log.info("Scheduled restart: next restart at %s", next_time.strftime("%Y-%m-%d %I:%M %p %Z"))
+
+        now = datetime.now(PLEX_SCHEDULED_RESTART_TZ)
+        delay = (next_time - now).total_seconds()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        if PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS and PLEX_TOKEN:
+            streams = get_active_streams()
+            if streams is not None and streams > 0:
+                log.info("Scheduled restart: skipped — %d active stream(s)", streams)
+                await channel.send(build_message(
+                    f"🔄 **Scheduled restart skipped** — {streams} active stream(s). Will retry next cycle."))
+                await asyncio.sleep(61)
+                continue
+            if streams is not None:
+                log.info("Scheduled restart: no active streams, proceeding")
+
+        log.info("Scheduled restart: executing now")
+        success, status = restart_plex_container()
+        if success:
+            log.info("Scheduled restart: container restarted successfully")
+            await channel.send(build_message("🔄 **Scheduled restart complete.** Plex container restarted."))
+        else:
+            log.warning("Scheduled restart: failed — %s", status)
+            await channel.send(build_message(f"⚠️ **Scheduled restart failed.** {status}"))
+
+        await asyncio.sleep(61)
 
 
 def _ssh_base_cmd():
@@ -341,6 +516,7 @@ client = discord.Client(intents=intents)
 
 alert_message_ids = set()
 snooze_until = 0
+_restart_task_started = False
 
 
 @client.event
@@ -420,10 +596,40 @@ async def on_ready():
     else:
         log.info("Auto-restart: disabled")
 
+    if PLEX_SCHEDULED_RESTART_ENABLED:
+        cron_expr, dom = build_restart_cron_expression()
+        if cron_expr:
+            next_time = next_scheduled_restart(cron_expr, dom)
+            if PLEX_SCHEDULED_RESTART_CRON:
+                log.info("Scheduled restart: cron '%s' (%s)", PLEX_SCHEDULED_RESTART_CRON, PLEX_SCHEDULED_RESTART_TZ)
+            else:
+                parts = [PLEX_SCHEDULED_RESTART_FREQUENCY, f"at {PLEX_SCHEDULED_RESTART_TIME}"]
+                if PLEX_SCHEDULED_RESTART_FREQUENCY == "weekly" and PLEX_SCHEDULED_RESTART_DAY_OF_WEEK:
+                    parts.append(f"on {PLEX_SCHEDULED_RESTART_DAY_OF_WEEK}")
+                if PLEX_SCHEDULED_RESTART_FREQUENCY == "monthly" and PLEX_SCHEDULED_RESTART_DAY_OF_MONTH:
+                    parts.append(f"on day {PLEX_SCHEDULED_RESTART_DAY_OF_MONTH}")
+                log.info("Scheduled restart: %s (%s)", " ".join(parts), PLEX_SCHEDULED_RESTART_TZ)
+            log.info("Scheduled restart: next restart at %s", next_time.strftime("%Y-%m-%d %I:%M %p %Z"))
+        else:
+            log.warning("Scheduled restart: enabled but misconfigured, will not run")
+    else:
+        log.info("Scheduled restart: disabled")
+
+    log.info("Quiet hours: %02d:00–%02d:00 %s", QUIET_START, QUIET_END, QUIET_TZ)
+    if PLEX_SCHEDULED_RESTART_ENABLED and QUIET_TZ != PLEX_SCHEDULED_RESTART_TZ:
+        log.warning("Timezone mismatch: quiet hours use %s but scheduled restarts use %s",
+                    QUIET_TZ, PLEX_SCHEDULED_RESTART_TZ)
+
     log.info("Waiting %ds for other containers to start...", STARTUP_DELAY)
     await asyncio.sleep(STARTUP_DELAY)
 
     log_startup_health()
+
+    global _restart_task_started
+    if PLEX_SCHEDULED_RESTART_ENABLED and not _restart_task_started:
+        client.loop.create_task(scheduled_restart_loop(channel))
+        _restart_task_started = True
+
     log.info("--- Monitoring Started ---")
 
     last_alert_time = 0
