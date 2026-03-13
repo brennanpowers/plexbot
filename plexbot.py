@@ -5,6 +5,7 @@ import subprocess
 import time
 import logging
 from datetime import datetime
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
@@ -34,7 +35,7 @@ MENTION_USER_ID = os.environ.get("DISCORD_MENTION_USER_ID")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN")
 PLEX_AUTO_RESTART = os.environ.get("PLEX_AUTO_RESTART", "false").lower() in ("true", "1", "yes")
 PLEX_CONTAINER_NAME = os.environ.get("PLEX_CONTAINER_NAME", "plex")
-PLEX_SSH_HOST = os.environ.get("PLEX_SSH_HOST", "")
+PLEX_SSH_HOST = os.environ.get("PLEX_SSH_HOST", "") or urlparse(PLEX_URL).hostname
 PLEX_SSH_USER = os.environ.get("PLEX_SSH_USER", "root")
 RESTART_AFTER_ALERTS = int(os.environ.get("RESTART_AFTER_ALERTS", "2"))
 RESTART_CHECK_DELAY = int(os.environ.get("RESTART_CHECK_DELAY_SECONDS", "60"))
