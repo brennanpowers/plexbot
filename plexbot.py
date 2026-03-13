@@ -34,14 +34,38 @@ CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL_SECONDS", "300"))
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "3600"))
 SNOOZE_SECONDS = int(os.environ.get("SNOOZE_HOURS", "4")) * 3600
 STARTUP_DELAY = int(os.environ.get("STARTUP_DELAY_SECONDS", "180"))
+QUIET_HOURS_ENABLED = os.environ.get("QUIET_HOURS_ENABLED", "false").lower() in ("true", "1", "yes")
 _quiet_tz_name = os.environ.get("QUIET_HOURS_TIMEZONE", "UTC").strip()
 try:
     QUIET_TZ = ZoneInfo(_quiet_tz_name)
 except KeyError:
     log.warning("Quiet hours: invalid timezone '%s', falling back to UTC", _quiet_tz_name)
     QUIET_TZ = ZoneInfo("UTC")
-QUIET_START = 23
-QUIET_END = 7
+_quiet_start_raw = os.environ.get("QUIET_HOURS_START", "")
+_quiet_end_raw = os.environ.get("QUIET_HOURS_END", "")
+if QUIET_HOURS_ENABLED:
+    if _quiet_start_raw and _quiet_end_raw:
+        try:
+            QUIET_START = int(_quiet_start_raw)
+            QUIET_END = int(_quiet_end_raw)
+            if not (0 <= QUIET_START <= 23 and 0 <= QUIET_END <= 23):
+                log.warning("!!! Quiet hours: QUIET_HOURS_START (%s) and QUIET_HOURS_END (%s) must be 0-23 — DISABLING quiet hours",
+                            _quiet_start_raw, _quiet_end_raw)
+                QUIET_HOURS_ENABLED = False
+        except ValueError:
+            log.warning("!!! Quiet hours: QUIET_HOURS_START ('%s') and QUIET_HOURS_END ('%s') must be integers — DISABLING quiet hours",
+                        _quiet_start_raw, _quiet_end_raw)
+            QUIET_HOURS_ENABLED = False
+    elif _quiet_start_raw or _quiet_end_raw:
+        log.warning("!!! Quiet hours: both QUIET_HOURS_START and QUIET_HOURS_END must be set (got start='%s', end='%s') — DISABLING quiet hours",
+                    _quiet_start_raw, _quiet_end_raw)
+        QUIET_HOURS_ENABLED = False
+    else:
+        log.warning("!!! Quiet hours: enabled but QUIET_HOURS_START and QUIET_HOURS_END not set — DISABLING quiet hours")
+        QUIET_HOURS_ENABLED = False
+if not QUIET_HOURS_ENABLED:
+    QUIET_START = 0
+    QUIET_END = 0
 MENTION_USER_ID = os.environ.get("DISCORD_MENTION_USER_ID")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN")
 PLEX_AUTO_RESTART = os.environ.get("PLEX_AUTO_RESTART", "false").lower() in ("true", "1", "yes")
@@ -252,6 +276,8 @@ def format_duration(seconds):
 
 
 def in_quiet_hours():
+    if not QUIET_HOURS_ENABLED:
+        return False
     hour = datetime.now(QUIET_TZ).hour
     return hour >= QUIET_START or hour < QUIET_END
 
@@ -619,8 +645,12 @@ async def on_ready():
     else:
         log.info("Scheduled restart: disabled")
 
-    log.info("Quiet hours: %02d:00–%02d:00 %s", QUIET_START, QUIET_END, QUIET_TZ)
-    if PLEX_SCHEDULED_RESTART_ENABLED and QUIET_TZ != PLEX_SCHEDULED_RESTART_TZ:
+    if QUIET_HOURS_ENABLED:
+        log.info("Quiet hours: %02d:00–%02d:00 %s", QUIET_START, QUIET_END, QUIET_TZ)
+    else:
+        log.info("Quiet hours: disabled")
+
+    if QUIET_HOURS_ENABLED and PLEX_SCHEDULED_RESTART_ENABLED and QUIET_TZ != PLEX_SCHEDULED_RESTART_TZ:
         log.warning("Timezone mismatch: quiet hours use %s but scheduled restarts use %s",
                     QUIET_TZ, PLEX_SCHEDULED_RESTART_TZ)
 

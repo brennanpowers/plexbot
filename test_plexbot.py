@@ -54,34 +54,72 @@ class TestFormatDuration:
 # ---- in_quiet_hours ----
 
 class TestInQuietHours:
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 23)
+    @patch("plexbot.QUIET_END", 7)
     @patch("plexbot.datetime")
     def test_during_quiet_late(self, mock_dt):
         from plexbot import in_quiet_hours, QUIET_TZ
         mock_dt.now.return_value = datetime(2026, 3, 13, 23, 30, tzinfo=QUIET_TZ)
         assert in_quiet_hours() is True
 
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 23)
+    @patch("plexbot.QUIET_END", 7)
     @patch("plexbot.datetime")
     def test_during_quiet_early(self, mock_dt):
         from plexbot import in_quiet_hours, QUIET_TZ
         mock_dt.now.return_value = datetime(2026, 3, 13, 3, 0, tzinfo=QUIET_TZ)
         assert in_quiet_hours() is True
 
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 23)
+    @patch("plexbot.QUIET_END", 7)
     @patch("plexbot.datetime")
     def test_outside_quiet(self, mock_dt):
         from plexbot import in_quiet_hours, QUIET_TZ
         mock_dt.now.return_value = datetime(2026, 3, 13, 12, 0, tzinfo=QUIET_TZ)
         assert in_quiet_hours() is False
 
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 23)
+    @patch("plexbot.QUIET_END", 7)
     @patch("plexbot.datetime")
     def test_boundary_start(self, mock_dt):
         from plexbot import in_quiet_hours, QUIET_TZ
         mock_dt.now.return_value = datetime(2026, 3, 13, 23, 0, tzinfo=QUIET_TZ)
         assert in_quiet_hours() is True
 
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 23)
+    @patch("plexbot.QUIET_END", 7)
     @patch("plexbot.datetime")
     def test_boundary_end(self, mock_dt):
         from plexbot import in_quiet_hours, QUIET_TZ
         mock_dt.now.return_value = datetime(2026, 3, 13, 7, 0, tzinfo=QUIET_TZ)
+        assert in_quiet_hours() is False
+
+    @patch("plexbot.QUIET_HOURS_ENABLED", False)
+    def test_disabled_always_returns_false(self):
+        from plexbot import in_quiet_hours
+        assert in_quiet_hours() is False
+
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 22)
+    @patch("plexbot.QUIET_END", 6)
+    @patch("plexbot.datetime")
+    def test_custom_window(self, mock_dt):
+        from plexbot import in_quiet_hours, QUIET_TZ
+        mock_dt.now.return_value = datetime(2026, 3, 13, 22, 0, tzinfo=QUIET_TZ)
+        assert in_quiet_hours() is True
+
+    @patch("plexbot.QUIET_HOURS_ENABLED", True)
+    @patch("plexbot.QUIET_START", 22)
+    @patch("plexbot.QUIET_END", 6)
+    @patch("plexbot.datetime")
+    def test_custom_window_outside(self, mock_dt):
+        from plexbot import in_quiet_hours, QUIET_TZ
+        mock_dt.now.return_value = datetime(2026, 3, 13, 10, 0, tzinfo=QUIET_TZ)
         assert in_quiet_hours() is False
 
 
