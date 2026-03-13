@@ -232,7 +232,12 @@ def restart_plex_container():
     host = PLEX_SSH_HOST
     try:
         if host:
-            cmd = ["ssh", "-o", "ConnectTimeout=10", f"{PLEX_SSH_USER}@{host}",
+            cmd = ["ssh",
+                   "-i", "/root/.ssh/plex_key",
+                   "-o", "ConnectTimeout=10",
+                   "-o", "StrictHostKeyChecking=no",
+                   "-o", "UserKnownHostsFile=/dev/null",
+                   f"{PLEX_SSH_USER}@{host}",
                    f"docker restart {name}"]
         else:
             cmd = ["docker", "restart", name]

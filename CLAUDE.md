@@ -14,8 +14,7 @@ pip install -r requirements.txt
 python plexbot.py
 
 # Docker (production, on Unraid)
-docker build -t plexbot .
-docker run -d --name plexbot --restart unless-stopped --env-file .env plexbot
+docker compose up -d --build
 ```
 
 Requires a `.env` file — copy from `.env.example`. At minimum needs `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`.
