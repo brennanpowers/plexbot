@@ -2,6 +2,7 @@ import asyncio
 import calendar
 import os
 import random
+import shlex
 import subprocess
 import time
 import logging
@@ -23,6 +24,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+def _env_bool(key, default="false"):
+    return os.environ.get(key, default).lower() in ("true", "1", "yes")
+
+
 _missing = [v for v in ("DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID") if v not in os.environ]
 if _missing:
     raise SystemExit(f"Missing required environment variable(s): {', '.join(_missing)}")
@@ -34,7 +39,8 @@ CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL_SECONDS", "300"))
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "3600"))
 SNOOZE_SECONDS = int(os.environ.get("SNOOZE_HOURS", "4")) * 3600
 STARTUP_DELAY = int(os.environ.get("STARTUP_DELAY_SECONDS", "180"))
-QUIET_HOURS_ENABLED = os.environ.get("QUIET_HOURS_ENABLED", "false").lower() in ("true", "1", "yes")
+SEND_STARTUP_MESSAGE = _env_bool("SEND_STARTUP_MESSAGE")
+QUIET_HOURS_ENABLED = _env_bool("QUIET_HOURS_ENABLED")
 _quiet_tz_name = os.environ.get("QUIET_HOURS_TIMEZONE", "UTC").strip()
 try:
     QUIET_TZ = ZoneInfo(_quiet_tz_name)
@@ -68,21 +74,20 @@ if not QUIET_HOURS_ENABLED:
     QUIET_END = 0
 MENTION_USER_ID = os.environ.get("DISCORD_MENTION_USER_ID")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN")
-PLEX_AUTO_RESTART = os.environ.get("PLEX_AUTO_RESTART", "false").lower() in ("true", "1", "yes")
+PLEX_AUTO_RESTART = _env_bool("PLEX_AUTO_RESTART")
 PLEX_CONTAINER_NAME = os.environ.get("PLEX_CONTAINER_NAME", "plex")
 PLEX_SSH_HOST = os.environ.get("PLEX_SSH_HOST", "") or urlparse(PLEX_URL).hostname
 PLEX_SSH_USER = os.environ.get("PLEX_SSH_USER", "root")
 RESTART_AFTER_ALERTS = int(os.environ.get("RESTART_AFTER_ALERTS", "2"))
 RESTART_CHECK_DELAY = int(os.environ.get("RESTART_CHECK_DELAY_SECONDS", "60"))
 RESTART_TIMEOUT = int(os.environ.get("RESTART_TIMEOUT_SECONDS", "120"))
-PLEX_SCHEDULED_RESTART_ENABLED = os.environ.get("PLEX_SCHEDULED_RESTART_ENABLED", "false").lower() in ("true", "1", "yes")
+PLEX_SCHEDULED_RESTART_ENABLED = _env_bool("PLEX_SCHEDULED_RESTART_ENABLED")
 PLEX_SCHEDULED_RESTART_CRON = os.environ.get("PLEX_SCHEDULED_RESTART_CRON", "").strip()
 PLEX_SCHEDULED_RESTART_FREQUENCY = os.environ.get("PLEX_SCHEDULED_RESTART_FREQUENCY", "").strip().lower()
 PLEX_SCHEDULED_RESTART_TIME = os.environ.get("PLEX_SCHEDULED_RESTART_TIME", "04:00").strip()
 PLEX_SCHEDULED_RESTART_DAY_OF_WEEK = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_WEEK", "").strip().lower()
 PLEX_SCHEDULED_RESTART_DAY_OF_MONTH = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_MONTH", "").strip()
-PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS = os.environ.get(
-    "PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS", "true").lower() in ("true", "1", "yes")
+PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS = _env_bool("PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS", "true")
 _restart_tz_name = os.environ.get("PLEX_SCHEDULED_RESTART_TIMEZONE", "UTC").strip()
 try:
     PLEX_SCHEDULED_RESTART_TZ = ZoneInfo(_restart_tz_name)
@@ -207,7 +212,7 @@ def check_plex_health():
             elif count is None:
                 problems.append(f"Library '{required}' unreadable")
 
-    return len(problems) == 0, problems
+    return not problems, problems
 
 
 def get_plex_identity():
@@ -497,7 +502,7 @@ def restart_plex_container():
     host = PLEX_SSH_HOST
     try:
         if host:
-            cmd = _ssh_base_cmd() + [f"docker restart {name}"]
+            cmd = _ssh_base_cmd() + [f"docker restart {shlex.quote(name)}"]
         else:
             cmd = ["docker", "restart", name]
 
@@ -658,6 +663,13 @@ async def on_ready():
     await asyncio.sleep(STARTUP_DELAY)
 
     log_startup_health()
+
+    if SEND_STARTUP_MESSAGE:
+        healthy, _ = check_plex_health()
+        if healthy:
+            await channel.send(build_message(random.choice(MESSAGES_STARTUP_OK)))
+        else:
+            await channel.send(build_message(random.choice(MESSAGES_STARTUP_DOWN)))
 
     global _restart_task_started
     if PLEX_SCHEDULED_RESTART_ENABLED and not _restart_task_started:

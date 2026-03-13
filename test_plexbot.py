@@ -659,3 +659,272 @@ class TestMessages:
         for msg in MESSAGES_BACK_UP:
             formatted = msg.format(duration="1h 30m")
             assert "1h 30m" in formatted
+
+    def test_startup_ok_messages_start_with_green(self):
+        from plexbot import MESSAGES_STARTUP_OK
+        for msg in MESSAGES_STARTUP_OK:
+            assert msg.startswith("🟢"), f"Startup OK message missing green circle: {msg}"
+
+    def test_startup_down_messages_start_with_red(self):
+        from plexbot import MESSAGES_STARTUP_DOWN
+        for msg in MESSAGES_STARTUP_DOWN:
+            assert msg.startswith("🔴"), f"Startup down message missing red circle: {msg}"
+
+
+# ---- _env_bool ----
+
+class TestEnvBool:
+    def test_true_values(self):
+        from plexbot import _env_bool
+        with patch.dict("os.environ", {"TEST_VAR": "true"}):
+            assert _env_bool("TEST_VAR") is True
+        with patch.dict("os.environ", {"TEST_VAR": "1"}):
+            assert _env_bool("TEST_VAR") is True
+        with patch.dict("os.environ", {"TEST_VAR": "yes"}):
+            assert _env_bool("TEST_VAR") is True
+        with patch.dict("os.environ", {"TEST_VAR": "TRUE"}):
+            assert _env_bool("TEST_VAR") is True
+        with patch.dict("os.environ", {"TEST_VAR": "Yes"}):
+            assert _env_bool("TEST_VAR") is True
+
+    def test_false_values(self):
+        from plexbot import _env_bool
+        with patch.dict("os.environ", {"TEST_VAR": "false"}):
+            assert _env_bool("TEST_VAR") is False
+        with patch.dict("os.environ", {"TEST_VAR": "0"}):
+            assert _env_bool("TEST_VAR") is False
+        with patch.dict("os.environ", {"TEST_VAR": "no"}):
+            assert _env_bool("TEST_VAR") is False
+        with patch.dict("os.environ", {"TEST_VAR": ""}):
+            assert _env_bool("TEST_VAR") is False
+
+    def test_missing_uses_default(self):
+        from plexbot import _env_bool
+        with patch.dict("os.environ", {}, clear=False):
+            assert _env_bool("NONEXISTENT_VAR") is False
+            assert _env_bool("NONEXISTENT_VAR", "true") is True
+
+
+# ---- check_plex_health (extended) ----
+
+class TestCheckPlexHealthExtended:
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.REQUIRED_LIBRARIES", ["Movies", "TV Shows"])
+    @patch("plexbot.get_plex_libraries")
+    @patch("plexbot._plex_get")
+    def test_healthy_with_libraries(self, mock_get, mock_libs):
+        from plexbot import check_plex_health
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        mock_libs.return_value = [
+            {"name": "Movies", "count": 100},
+            {"name": "TV Shows", "count": 50},
+        ]
+        healthy, problems = check_plex_health()
+        assert healthy is True
+        assert problems == []
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.REQUIRED_LIBRARIES", ["Movies", "TV Shows"])
+    @patch("plexbot.get_plex_libraries")
+    @patch("plexbot._plex_get")
+    def test_missing_library(self, mock_get, mock_libs):
+        from plexbot import check_plex_health
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        mock_libs.return_value = [{"name": "Movies", "count": 100}]
+        healthy, problems = check_plex_health()
+        assert healthy is False
+        assert any("TV Shows" in p for p in problems)
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.REQUIRED_LIBRARIES", ["Movies"])
+    @patch("plexbot.get_plex_libraries")
+    @patch("plexbot._plex_get")
+    def test_empty_library(self, mock_get, mock_libs):
+        from plexbot import check_plex_health
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        mock_libs.return_value = [{"name": "Movies", "count": 0}]
+        healthy, problems = check_plex_health()
+        assert healthy is False
+        assert any("empty" in p.lower() for p in problems)
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.REQUIRED_LIBRARIES", ["Movies"])
+    @patch("plexbot.get_plex_libraries")
+    @patch("plexbot._plex_get")
+    def test_unreadable_library(self, mock_get, mock_libs):
+        from plexbot import check_plex_health
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        mock_libs.return_value = [{"name": "Movies", "count": None}]
+        healthy, problems = check_plex_health()
+        assert healthy is False
+        assert any("unreadable" in p.lower() for p in problems)
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.REQUIRED_LIBRARIES", ["Movies"])
+    @patch("plexbot.get_plex_libraries")
+    @patch("plexbot._plex_get")
+    def test_libraries_return_none(self, mock_get, mock_libs):
+        from plexbot import check_plex_health
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        mock_libs.return_value = None
+        healthy, problems = check_plex_health()
+        assert healthy is False
+        assert "Unable to read libraries" in problems
+
+
+# ---- get_plex_libraries ----
+
+class TestGetPlexLibraries:
+    @patch("plexbot.PLEX_TOKEN", "")
+    def test_no_token_returns_none(self):
+        from plexbot import get_plex_libraries
+        assert get_plex_libraries() is None
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot.get_library_count")
+    @patch("plexbot._plex_get")
+    def test_parses_directories(self, mock_get, mock_count):
+        from plexbot import get_plex_libraries
+        mock_get.return_value = ElementTree.fromstring(
+            '<MediaContainer><Directory title="Movies" key="1"/>'
+            '<Directory title="TV Shows" key="2"/></MediaContainer>'
+        )
+        mock_count.side_effect = [100, 50]
+        result = get_plex_libraries()
+        assert len(result) == 2
+        assert result[0] == {"name": "Movies", "count": 100}
+        assert result[1] == {"name": "TV Shows", "count": 50}
+
+
+# ---- get_library_count ----
+
+class TestGetLibraryCount:
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot._plex_get")
+    def test_returns_count(self, mock_get):
+        from plexbot import get_library_count
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer totalSize="42"/>')
+        assert get_library_count("1") == 42
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    @patch("plexbot._plex_get")
+    def test_no_total_size_defaults_zero(self, mock_get):
+        from plexbot import get_library_count
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        assert get_library_count("1") == 0
+
+    @patch("plexbot.PLEX_TOKEN", "")
+    def test_no_token_returns_none(self):
+        from plexbot import get_library_count
+        assert get_library_count("1") is None
+
+    @patch("plexbot.PLEX_TOKEN", "token")
+    def test_no_key_returns_none(self):
+        from plexbot import get_library_count
+        assert get_library_count("") is None
+        assert get_library_count(None) is None
+
+
+# ---- _plex_get (extended) ----
+
+class TestPlexGetExtended:
+    @patch("plexbot.requests.get")
+    def test_timeout(self, mock_get):
+        import requests as req
+        from plexbot import _plex_get
+        mock_get.side_effect = req.Timeout
+        assert _plex_get("/identity") is None
+
+    @patch("plexbot.requests.get")
+    @patch("plexbot.PLEX_TOKEN", "")
+    def test_no_token_no_header(self, mock_get):
+        from plexbot import _plex_get
+        mock_get.return_value = MagicMock(status_code=200, text='<MediaContainer/>')
+        _plex_get("/identity", use_token=True)
+        _, kwargs = mock_get.call_args
+        assert "X-Plex-Token" not in kwargs["headers"]
+
+    @patch("plexbot.requests.get")
+    def test_uses_correct_url(self, mock_get):
+        from plexbot import _plex_get, PLEX_URL
+        mock_get.return_value = MagicMock(status_code=200, text='<MediaContainer/>')
+        _plex_get("/identity")
+        url = mock_get.call_args[0][0]
+        assert url == f"{PLEX_URL}/identity"
+
+
+# ---- restart_plex_container (extended) ----
+
+class TestRestartPlexContainerExtended:
+    @patch("plexbot.PLEX_SSH_HOST", "10.0.0.16")
+    @patch("plexbot.PLEX_SSH_USER", "root")
+    @patch("plexbot.PLEX_CONTAINER_NAME", "plex")
+    @patch("plexbot.subprocess.run")
+    def test_ssh_command_includes_strict_host_key_no(self, mock_run):
+        from plexbot import restart_plex_container
+        mock_run.return_value = MagicMock(returncode=0)
+        restart_plex_container()
+        cmd = mock_run.call_args[0][0]
+        assert "-o" in cmd
+        assert "StrictHostKeyChecking=no" in cmd
+
+    @patch("plexbot.PLEX_SSH_HOST", "10.0.0.16")
+    @patch("plexbot.PLEX_SSH_USER", "root")
+    @patch("plexbot.PLEX_CONTAINER_NAME", "my container")
+    @patch("plexbot.subprocess.run")
+    def test_container_name_is_shell_quoted(self, mock_run):
+        from plexbot import restart_plex_container
+        mock_run.return_value = MagicMock(returncode=0)
+        restart_plex_container()
+        cmd = mock_run.call_args[0][0]
+        remote_cmd = cmd[-1]
+        assert "my container" not in remote_cmd or "'" in remote_cmd
+
+    @patch("plexbot.PLEX_SSH_HOST", "10.0.0.16")
+    @patch("plexbot.PLEX_SSH_USER", "root")
+    @patch("plexbot.PLEX_CONTAINER_NAME", "plex")
+    @patch("plexbot.subprocess.run")
+    def test_ssh_no_route_to_host(self, mock_run):
+        from plexbot import restart_plex_container
+        mock_run.return_value = MagicMock(returncode=255, stderr="No route to host")
+        success, msg = restart_plex_container()
+        assert success is False
+        assert "Could not SSH" in msg
+
+    @patch("plexbot.PLEX_SSH_HOST", "10.0.0.16")
+    @patch("plexbot.PLEX_SSH_USER", "root")
+    @patch("plexbot.PLEX_CONTAINER_NAME", "plex")
+    @patch("plexbot.subprocess.run")
+    def test_ssh_connection_timed_out(self, mock_run):
+        from plexbot import restart_plex_container
+        mock_run.return_value = MagicMock(returncode=255, stderr="Connection timed out")
+        success, msg = restart_plex_container()
+        assert success is False
+        assert "Could not SSH" in msg
+
+
+# ---- get_active_streams (extended) ----
+
+class TestGetActiveStreamsExtended:
+    @patch("plexbot._plex_get")
+    def test_missing_size_attribute(self, mock_get):
+        from plexbot import get_active_streams
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        assert get_active_streams() == 0
+
+    @patch("plexbot._plex_get")
+    def test_invalid_size_value(self, mock_get):
+        from plexbot import get_active_streams
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer size="abc"/>')
+        assert get_active_streams() is None
+
+
+# ---- get_plex_identity (extended) ----
+
+class TestGetPlexIdentityExtended:
+    @patch("plexbot._plex_get")
+    def test_missing_attributes_default(self, mock_get):
+        from plexbot import get_plex_identity
+        mock_get.return_value = ElementTree.fromstring('<MediaContainer/>')
+        result = get_plex_identity()
+        assert result == {"name": "Unknown", "version": "Unknown"}
