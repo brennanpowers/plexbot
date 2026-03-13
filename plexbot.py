@@ -23,9 +23,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+_missing = [v for v in ("DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID") if v not in os.environ]
+if _missing:
+    raise SystemExit(f"Missing required environment variable(s): {', '.join(_missing)}")
+
 DISCORD_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
-PLEX_URL = os.environ.get("PLEX_URL", "http://10.0.0.16:32400")
+PLEX_URL = os.environ.get("PLEX_URL", "http://localhost:32400")
 CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL_SECONDS", "300"))
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "3600"))
 SNOOZE_SECONDS = int(os.environ.get("SNOOZE_HOURS", "4")) * 3600

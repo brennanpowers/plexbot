@@ -6,4 +6,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ${PLEX_SSH_KEY_HOST_PATH:-~/.ssh/id_rsa}:/root/.ssh/plex_key:ro
+      - ${PLEX_SSH_KEY_HOST_PATH}:/root/.ssh/plex_key:ro
