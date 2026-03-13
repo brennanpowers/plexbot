@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import subprocess
 import time
 import logging
 from datetime import datetime
@@ -31,6 +32,13 @@ QUIET_START = 23
 QUIET_END = 7
 MENTION_USER_ID = os.environ.get("DISCORD_MENTION_USER_ID")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN")
+PLEX_AUTO_RESTART = os.environ.get("PLEX_AUTO_RESTART", "false").lower() in ("true", "1", "yes")
+PLEX_CONTAINER_NAME = os.environ.get("PLEX_CONTAINER_NAME", "plex")
+PLEX_SSH_HOST = os.environ.get("PLEX_SSH_HOST", "")
+PLEX_SSH_USER = os.environ.get("PLEX_SSH_USER", "root")
+RESTART_AFTER_ALERTS = int(os.environ.get("RESTART_AFTER_ALERTS", "2"))
+RESTART_CHECK_DELAY = int(os.environ.get("RESTART_CHECK_DELAY_SECONDS", "60"))
+RESTART_TIMEOUT = int(os.environ.get("RESTART_TIMEOUT_SECONDS", "120"))
 REQUIRED_LIBRARIES = [
     name.strip()
     for name in os.environ.get("PLEX_REQUIRED_LIBRARIES", "").split(",")
@@ -217,6 +225,55 @@ def build_message(text):
     return text
 
 
+def restart_plex_container():
+    """Restart the Plex Docker container. Returns (success, status_message)."""
+    name = PLEX_CONTAINER_NAME
+    host = PLEX_SSH_HOST
+    try:
+        if host:
+            cmd = ["ssh", "-o", "ConnectTimeout=10", f"{PLEX_SSH_USER}@{host}",
+                   f"docker restart {name}"]
+        else:
+            cmd = ["docker", "restart", name]
+
+        log.info("Restarting Plex container: %s", " ".join(cmd))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=RESTART_TIMEOUT)
+
+        if result.returncode == 0:
+            return True, "🔄 Restart issued — checking if Plex recovers..."
+
+        stderr = result.stderr.strip()
+        if host and ("Connection refused" in stderr or "No route to host" in stderr
+                     or "Connection timed out" in stderr or "Could not resolve" in stderr):
+            return False, f"❌ Could not SSH into {host} — server may be fully down"
+        if "No such container" in stderr or f"Error: No such object: {name}" in stderr:
+            return False, f"❌ Container '{name}' not found on {host or 'localhost'}"
+        return False, f"❌ Docker command failed: {stderr[:200]}"
+
+    except subprocess.TimeoutExpired:
+        return False, f"❌ Restart command timed out ({RESTART_TIMEOUT}s) — server may be unresponsive"
+    except FileNotFoundError:
+        return False, "❌ docker/ssh command not available in this container"
+
+
+async def attempt_restart_and_check():
+    """Attempt to restart Plex and re-check health. Returns (recovered, status_message)."""
+    success, status = restart_plex_container()
+    if not success:
+        return False, status
+
+    log.info("Restart issued, waiting %ds before health check...", RESTART_CHECK_DELAY)
+    await asyncio.sleep(RESTART_CHECK_DELAY)
+
+    healthy, problems = check_plex_health()
+    if healthy:
+        log.info("Plex recovered after restart")
+        return True, "✅ Restart successful — Plex is back up!"
+    else:
+        log.warning("Plex still down after restart: %s", "; ".join(problems))
+        return False, "⚠️ Restart issued but Plex is still not responding"
+
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
@@ -302,6 +359,7 @@ async def on_ready():
 
     last_alert_time = 0
     down_since = None
+    alert_count_this_outage = 0
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
@@ -321,6 +379,7 @@ async def on_ready():
                     await channel.send(build_message(text))
                 down_since = None
                 last_alert_time = 0
+                alert_count_this_outage = 0
                 alert_message_ids.clear()
             else:
                 log.info("Plex is up")
@@ -330,13 +389,31 @@ async def on_ready():
             cooldown_ok = now - last_alert_time >= ALERT_COOLDOWN
 
             if cooldown_ok and not snoozed and not quiet:
-                log.warning("Plex is DOWN — sending alert")
+                alert_count_this_outage += 1
+                log.warning("Plex is DOWN — sending alert #%d", alert_count_this_outage)
                 text = random.choice(MESSAGES_DOWN)
                 sent = await channel.send(build_message(text))
                 if len(alert_message_ids) >= MAX_TRACKED_ALERTS:
                     alert_message_ids.pop()
                 alert_message_ids.add(sent.id)
                 last_alert_time = now
+
+                if PLEX_AUTO_RESTART and alert_count_this_outage >= RESTART_AFTER_ALERTS:
+                    log.info("Attempting auto-restart (alert #%d)", alert_count_this_outage)
+                    await sent.edit(content=build_message(text + "\n🔄 Restarting Plex..."))
+
+                    recovered, status = await attempt_restart_and_check()
+                    await sent.edit(content=build_message(text + f"\n{status}"))
+
+                    if recovered:
+                        downtime_secs = time.time() - down_since
+                        duration = format_duration(downtime_secs)
+                        recovery_text = random.choice(MESSAGES_BACK_UP).format(duration=duration)
+                        await channel.send(build_message(recovery_text))
+                        down_since = None
+                        last_alert_time = 0
+                        alert_count_this_outage = 0
+                        alert_message_ids.clear()
             else:
                 reason = "snoozed" if snoozed else "quiet hours" if quiet else "cooldown"
                 log.warning("Plex is DOWN — alert suppressed (%s)", reason)
