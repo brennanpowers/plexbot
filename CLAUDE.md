@@ -28,6 +28,7 @@ Everything lives in `plexbot.py`. No tests, no modules.
 - **Discord event loop**: `on_ready()` runs the polling loop with `asyncio.sleep`. `on_message()` handles the `!health` command. `on_reaction_add()` handles snooze.
 - **Alert suppression**: Three layers — quiet hours (11 PM–7 AM Central), cooldown (1 alert/hour), and snooze (emoji reaction extends cooldown).
 - **Auto-restart**: Opt-in via `PLEX_AUTO_RESTART`. On the 2nd+ alert (`RESTART_AFTER_ALERTS`), the bot SSHes into the Plex host to `docker restart` the container. SSH key is mounted into the container via `docker-compose.yml` (`PLEX_SSH_KEY_HOST_PATH`). SSH host defaults to hostname parsed from `PLEX_URL`. After restarting, waits `RESTART_CHECK_DELAY_SECONDS` and re-checks health. The down message is edited in-place with restart status. If Plex recovers, a recovery message is posted and outage state resets. `restart_plex_container()` handles the subprocess call; `attempt_restart_and_check()` orchestrates restart + re-check.
+- **Startup diagnostics**: On boot, logs SSH connectivity (if auto-restart enabled) and Plex health (server identity, library counts, any issues). Runs after `STARTUP_DELAY_SECONDS`. Non-blocking — failures are logged as warnings, never prevent the bot from starting.
 - **Messages**: Random movie/TV quotes from message lists (`MESSAGES_DOWN`, `MESSAGES_BACK_UP`, etc.). Down messages must start with `🔴 **Plex is down!**`. Keep the tone fun.
 
 ## Key Design Decisions
