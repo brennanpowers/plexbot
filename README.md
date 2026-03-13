@@ -11,7 +11,7 @@ A Discord bot that monitors your Plex Media Server and alerts you when it goes d
 - **Health monitoring** — Checks Plex every 5 minutes (configurable) and alerts Discord when it's down
 - **Library validation** — Verifies that required libraries exist and aren't empty (e.g., Movies, TV Shows)
 - **Recovery notifications** — Tells you when Plex is back and how long it was down
-- **Quiet hours** — No alerts between 11 PM and 7 AM (timezone configurable)
+- **Quiet hours** — No alerts from 11 PM through 6:59 AM (timezone configurable, alerts resume at 7:00 AM)
 - **Snooze** — React to any alert with an emoji to snooze further alerts for 4 hours (configurable)
 - **Auto-restart** — Optionally SSH into the Plex host and restart the Docker container after repeated failures
 - **Scheduled restart** — Proactively restart Plex on a cron schedule or friendly daily/weekly/monthly config
@@ -43,7 +43,7 @@ Edit `.env` with your values:
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | Yes | Bot token from Discord Developer Portal |
 | `DISCORD_CHANNEL_ID` | Yes | Channel ID for alerts (enable Developer Mode, right-click channel, Copy ID) |
-| `PLEX_URL` | No | Plex server URL (default: `http://10.0.0.16:32400`) |
+| `PLEX_URL` | No | Plex server URL (default: `http://localhost:32400`) |
 | `PLEX_TOKEN` | No | Plex auth token for library checks ([how to find](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)) |
 | `PLEX_REQUIRED_LIBRARIES` | No | Comma-separated library names to validate (e.g., `Movies,TV Shows`) |
 | `CHECK_INTERVAL_SECONDS` | No | How often to check Plex (default: `300`) |
@@ -56,7 +56,7 @@ Edit `.env` with your values:
 | `PLEX_CONTAINER_NAME` | No | Name of the Plex Docker container to restart (default: `plex`) |
 | `PLEX_SSH_HOST` | No | SSH host for restart (defaults to hostname from `PLEX_URL`) |
 | `PLEX_SSH_USER` | No | SSH user on the Plex host (default: `root`) |
-| `PLEX_SSH_KEY_HOST_PATH` | No | Path to SSH private key on the host, mounted into container (default: `~/.ssh/id_rsa`) |
+| `PLEX_SSH_KEY_HOST_PATH` | No | Absolute path to SSH private key on the host, mounted into container |
 | `RESTART_AFTER_ALERTS` | No | Number of alerts before auto-restart kicks in (default: `2`) |
 | `RESTART_CHECK_DELAY_SECONDS` | No | Seconds to wait after restart before re-checking health (default: `60`) |
 | `RESTART_TIMEOUT_SECONDS` | No | Timeout for the restart command (default: `120`) |
@@ -92,7 +92,7 @@ python plexbot.py
 
 ## Snooze
 
-When the bot sends a down alert, react to it with any emoji to snooze further alerts. Only the configured `DISCORD_MENTION_USER_ID` can snooze (if set). The bot will confirm with a message showing how long alerts are snoozed.
+When the bot sends a down alert, react to it with any emoji to snooze further alerts. If `DISCORD_MENTION_USER_ID` is set, only that user can snooze — reactions from other users are ignored. If not set, anyone can snooze. The bot will confirm with a message showing how long alerts are snoozed.
 
 ## Auto-Restart
 
@@ -114,10 +114,10 @@ The bot needs passwordless SSH access to the Plex host. The SSH private key is m
 ssh-keygen -t ed25519 -f ~/.ssh/plexbot_key -N ""
 
 # Copy the public key to the Plex host
-ssh-copy-id -i ~/.ssh/plexbot_key.pub root@10.0.0.16
+ssh-copy-id -i ~/.ssh/plexbot_key.pub root@YOUR_PLEX_HOST_IP
 
-# Set the path in .env
-PLEX_SSH_KEY_HOST_PATH=~/.ssh/plexbot_key
+# Set the absolute path in .env (~ won't expand in docker-compose)
+PLEX_SSH_KEY_HOST_PATH=/home/youruser/.ssh/plexbot_key
 ```
 
 On startup, the bot tests the SSH connection and logs the result. This does not prevent the bot from starting if SSH is unavailable.
