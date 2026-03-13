@@ -11,7 +11,7 @@ A Discord bot that monitors your Plex Media Server and alerts you when it goes d
 - **Health monitoring** — Checks Plex every 5 minutes (configurable) and alerts Discord when it's down
 - **Library validation** — Verifies that required libraries exist and aren't empty (e.g., Movies, TV Shows)
 - **Recovery notifications** — Tells you when Plex is back and how long it was down
-- **Quiet hours** — No alerts from 11 PM through 6:59 AM (timezone configurable, alerts resume at 7:00 AM)
+- **Quiet hours** — Optionally suppress alerts during a configurable time window (e.g. 11 PM–7 AM)
 - **Snooze** — React to any alert with an emoji to snooze further alerts for 4 hours (configurable)
 - **Auto-restart** — Optionally SSH into the Plex host and restart the Docker container after repeated failures
 - **Scheduled restart** — Proactively restart Plex on a cron schedule or friendly daily/weekly/monthly config
@@ -49,6 +49,9 @@ Edit `.env` with your values:
 | `CHECK_INTERVAL_SECONDS` | No | How often to check Plex (default: `300`) |
 | `ALERT_COOLDOWN_SECONDS` | No | Min time between repeated down alerts (default: `3600`) |
 | `SNOOZE_HOURS` | No | Hours to snooze on emoji reaction (default: `4`) |
+| `QUIET_HOURS_ENABLED` | No | Enable quiet hours alert suppression (default: `false`) |
+| `QUIET_HOURS_START` | No | Hour to start suppressing alerts, 0-23 (e.g. `23` for 11 PM) |
+| `QUIET_HOURS_END` | No | Hour to resume alerts, 0-23 (e.g. `7` for 7 AM) |
 | `QUIET_HOURS_TIMEZONE` | No | Timezone for quiet hours (default: `UTC`, e.g. `America/Chicago`) |
 | `STARTUP_DELAY_SECONDS` | No | Wait time before first check, set to `0` to skip (default: `180`) |
 | `DISCORD_MENTION_USER_ID` | No | Discord user ID to @mention on alerts |

@@ -44,5 +44,5 @@ When adding or modifying functionality, add or update corresponding tests in `te
 
 ## Key Design Decisions
 
-- Quiet hours timezone configurable via `QUIET_HOURS_TIMEZONE` (default UTC). Quiet start/end hours (23–7) are still hardcoded
+- Quiet hours fully configurable via `QUIET_HOURS_ENABLED`, `QUIET_HOURS_START`, `QUIET_HOURS_END`, `QUIET_HOURS_TIMEZONE`. Disabled by default. Validates both START and END are set together and within 0-23 — disables with loud warning on misconfiguration
 - Auto-restart only triggers when an alert is actually sent (not suppressed by cooldown/snooze/quiet hours)
