@@ -226,19 +226,73 @@ def build_message(text):
     return text
 
 
+def _ssh_base_cmd():
+    """Build the common SSH command prefix."""
+    return ["ssh",
+            "-i", "/root/.ssh/plex_key",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            f"{PLEX_SSH_USER}@{PLEX_SSH_HOST}"]
+
+
+def check_ssh_connectivity():
+    """Test SSH connection to the Plex host. Logs result, never raises."""
+    if not PLEX_SSH_HOST:
+        log.info("Auto-restart: no SSH host configured, will use local Docker socket")
+        return
+    try:
+        cmd = _ssh_base_cmd() + ["echo", "ok"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            log.info("Auto-restart: SSH connection to %s@%s successful", PLEX_SSH_USER, PLEX_SSH_HOST)
+        else:
+            log.warning("Auto-restart: SSH connection to %s@%s failed: %s",
+                        PLEX_SSH_USER, PLEX_SSH_HOST, result.stderr.strip())
+    except FileNotFoundError:
+        log.warning("Auto-restart: ssh command not available in this container")
+    except subprocess.TimeoutExpired:
+        log.warning("Auto-restart: SSH connection to %s@%s timed out", PLEX_SSH_USER, PLEX_SSH_HOST)
+
+
+def log_startup_health():
+    """Log Plex health status at startup."""
+    identity = get_plex_identity()
+    if not identity:
+        log.warning("Plex health: not responding at %s", PLEX_URL)
+        return
+
+    log.info("Plex health: online — %s v%s", identity["name"], identity["version"])
+
+    libraries = get_plex_libraries()
+    if libraries is None:
+        if PLEX_TOKEN:
+            log.warning("Plex health: unable to read libraries")
+        return
+
+    for lib in libraries:
+        if lib["count"] is not None:
+            if lib["count"] == 0:
+                log.warning("Plex health:   %s — EMPTY", lib["name"])
+            else:
+                log.info("Plex health:   %s — %d items", lib["name"], lib["count"])
+        else:
+            log.warning("Plex health:   %s — unable to read", lib["name"])
+
+    healthy, problems = check_plex_health()
+    if healthy:
+        log.info("Plex health: all checks passed")
+    else:
+        log.warning("Plex health: issues detected — %s", "; ".join(problems))
+
+
 def restart_plex_container():
     """Restart the Plex Docker container. Returns (success, status_message)."""
     name = PLEX_CONTAINER_NAME
     host = PLEX_SSH_HOST
     try:
         if host:
-            cmd = ["ssh",
-                   "-i", "/root/.ssh/plex_key",
-                   "-o", "ConnectTimeout=10",
-                   "-o", "StrictHostKeyChecking=no",
-                   "-o", "UserKnownHostsFile=/dev/null",
-                   f"{PLEX_SSH_USER}@{host}",
-                   f"docker restart {name}"]
+            cmd = _ssh_base_cmd() + [f"docker restart {name}"]
         else:
             cmd = ["docker", "restart", name]
 
@@ -359,9 +413,18 @@ async def on_ready():
         await client.close()
         return
 
+    log.info("--- Startup Diagnostics ---")
+
+    if PLEX_AUTO_RESTART:
+        check_ssh_connectivity()
+    else:
+        log.info("Auto-restart: disabled")
+
     log.info("Waiting %ds for other containers to start...", STARTUP_DELAY)
     await asyncio.sleep(STARTUP_DELAY)
-    log.info("Startup delay complete, beginning monitoring")
+
+    log_startup_health()
+    log.info("--- Monitoring Started ---")
 
     last_alert_time = 0
     down_since = None
