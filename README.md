@@ -14,6 +14,7 @@ A Discord bot that monitors your Plex Media Server and alerts you when it goes d
 - **Quiet hours** — No alerts between 11 PM and 7 AM Central
 - **Snooze** — React to any alert with an emoji to snooze further alerts for 4 hours (configurable)
 - **Auto-restart** — Optionally SSH into the Plex host and restart the Docker container after repeated failures
+- **Startup diagnostics** — Logs SSH connectivity and Plex health status on boot
 - **@mentions** — Optionally ping a specific user on alerts
 - **`!health` command** — On-demand health check showing server info and library stats
 - **Fun messages** — Random movie/TV quotes with every alert
@@ -47,7 +48,7 @@ Edit `.env` with your values:
 | `CHECK_INTERVAL_SECONDS` | No | How often to check Plex (default: `300`) |
 | `ALERT_COOLDOWN_SECONDS` | No | Min time between repeated down alerts (default: `3600`) |
 | `SNOOZE_HOURS` | No | Hours to snooze on emoji reaction (default: `4`) |
-| `STARTUP_DELAY_SECONDS` | No | Wait time before first check (default: `180`) |
+| `STARTUP_DELAY_SECONDS` | No | Wait time before first check, set to `0` to skip (default: `180`) |
 | `DISCORD_MENTION_USER_ID` | No | Discord user ID to @mention on alerts |
 | `PLEX_AUTO_RESTART` | No | Enable auto-restart of Plex container on prolonged outage (default: `false`) |
 | `PLEX_CONTAINER_NAME` | No | Name of the Plex Docker container to restart (default: `plex`) |
@@ -108,3 +109,5 @@ ssh-copy-id -i ~/.ssh/plexbot_key.pub root@10.0.0.16
 # Set the path in .env
 PLEX_SSH_KEY_HOST_PATH=~/.ssh/plexbot_key
 ```
+
+On startup, the bot tests the SSH connection and logs the result. This does not prevent the bot from starting if SSH is unavailable.
