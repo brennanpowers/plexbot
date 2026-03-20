@@ -88,6 +88,7 @@ PLEX_SCHEDULED_RESTART_TIME = os.environ.get("PLEX_SCHEDULED_RESTART_TIME", "04:
 PLEX_SCHEDULED_RESTART_DAY_OF_WEEK = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_WEEK", "").strip().lower()
 PLEX_SCHEDULED_RESTART_DAY_OF_MONTH = os.environ.get("PLEX_SCHEDULED_RESTART_DAY_OF_MONTH", "").strip()
 PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS = _env_bool("PLEX_SCHEDULED_RESTART_SKIP_IF_ACTIVE_STREAMS", "true")
+PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS = _env_bool("PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS")
 _restart_tz_name = os.environ.get("PLEX_SCHEDULED_RESTART_TIMEZONE", "UTC").strip()
 try:
     PLEX_SCHEDULED_RESTART_TZ = ZoneInfo(_restart_tz_name)
@@ -428,7 +429,8 @@ async def scheduled_restart_loop(channel):
         success, status = restart_plex_container()
         if success:
             log.info("Scheduled restart: container restarted successfully")
-            await channel.send(build_message("🔄 **Scheduled restart complete.** Plex container restarted."))
+            if PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS:
+                await channel.send(build_message("🔄 **Scheduled restart complete.** Plex container restarted."))
         else:
             log.warning("Scheduled restart: failed — %s", status)
             await channel.send(build_message(f"⚠️ **Scheduled restart failed.** {status}"))

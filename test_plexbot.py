@@ -1,7 +1,8 @@
+import asyncio
 import calendar
 import subprocess
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
@@ -389,6 +390,52 @@ class TestNextScheduledRestart:
         from plexbot import next_scheduled_restart
         result = next_scheduled_restart("0 4 * * *", None)
         assert result.tzinfo == ZoneInfo("America/Chicago")
+
+
+# ---- scheduled_restart_loop ----
+
+class TestScheduledRestartLoopNotifySuccess:
+    @patch("plexbot.asyncio.sleep", side_effect=[None, asyncio.CancelledError])
+    @patch("plexbot.restart_plex_container", return_value=(True, "restarting"))
+    @patch("plexbot.build_restart_cron_expression", return_value=("* * * * *", None))
+    @patch("plexbot.PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS", True)
+    @pytest.mark.asyncio
+    async def test_success_notification_sent_when_enabled(self, mock_cron, mock_restart, mock_sleep):
+        from plexbot import scheduled_restart_loop
+        channel = MagicMock()
+        channel.send = AsyncMock()
+        with pytest.raises(asyncio.CancelledError):
+            await scheduled_restart_loop(channel)
+        sent_messages = [call.args[0] for call in channel.send.call_args_list]
+        assert any("Scheduled restart complete" in msg for msg in sent_messages)
+
+    @patch("plexbot.asyncio.sleep", side_effect=[None, asyncio.CancelledError])
+    @patch("plexbot.restart_plex_container", return_value=(True, "restarting"))
+    @patch("plexbot.build_restart_cron_expression", return_value=("* * * * *", None))
+    @patch("plexbot.PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS", False)
+    @pytest.mark.asyncio
+    async def test_success_notification_suppressed_when_disabled(self, mock_cron, mock_restart, mock_sleep):
+        from plexbot import scheduled_restart_loop
+        channel = MagicMock()
+        channel.send = AsyncMock()
+        with pytest.raises(asyncio.CancelledError):
+            await scheduled_restart_loop(channel)
+        sent_messages = [call.args[0] for call in channel.send.call_args_list]
+        assert not any("Scheduled restart complete" in msg for msg in sent_messages)
+
+    @patch("plexbot.asyncio.sleep", side_effect=[None, asyncio.CancelledError])
+    @patch("plexbot.restart_plex_container", return_value=(False, "SSH failed"))
+    @patch("plexbot.build_restart_cron_expression", return_value=("* * * * *", None))
+    @patch("plexbot.PLEX_SCHEDULED_RESTART_NOTIFY_SUCCESS", False)
+    @pytest.mark.asyncio
+    async def test_failure_notification_always_sent(self, mock_cron, mock_restart, mock_sleep):
+        from plexbot import scheduled_restart_loop
+        channel = MagicMock()
+        channel.send = AsyncMock()
+        with pytest.raises(asyncio.CancelledError):
+            await scheduled_restart_loop(channel)
+        sent_messages = [call.args[0] for call in channel.send.call_args_list]
+        assert any("Scheduled restart failed" in msg for msg in sent_messages)
 
 
 # ---- DAY_OF_WEEK_MAP ----
